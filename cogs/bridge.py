@@ -25,7 +25,6 @@ from datetime import datetime
 import random
 import string
 import copy
-import json
 
 mentions = discord.AllowedMentions(everyone=False, roles=False, users=False)
 
@@ -489,10 +488,10 @@ class Bridge(commands.Cog):
             discord.ui.Button(style=ButtonStyle.gray, label='Cancel', custom_id=f'cancel', disabled=False)
         )
         components = discord.ui.MessageComponents(btns, btns2)
-        await ctx.send('How does this message violate our rules?', components=components, ephemeral=True)
+        msg = await ctx.send('How does this message violate our rules?', components=components, ephemeral=True)
 
         def check(interaction):
-            return interaction.user.id == ctx.author.id
+            return interaction.user.id == ctx.author.id and interaction.message.id == msg.id
 
         try:
             interaction = await self.bot.wait_for('component_interaction', check=check, timeout=60)
@@ -569,6 +568,7 @@ class Bridge(commands.Cog):
         embed.add_field(name="Sender ID", value=str(userid), inline=False)
         embed.add_field(name="Message room", value=roomname, inline=False)
         embed.add_field(name="Message ID", value=interaction.custom_id.split('_')[1], inline=False)
+        embed.add_field(name="Reporter ID", value=str(interaction.user.id), inline=False)
         try:
             embed.set_footer(text=f'Submitted by {author} - please do not disclose actions taken against the user.', icon_url=interaction.user.avatar.url)
         except:
@@ -588,6 +588,9 @@ class Bridge(commands.Cog):
         ch = guild.get_channel(1203676755559452712)
         btns = discord.ui.ActionRow(
             discord.ui.Button(style=discord.ButtonStyle.red, label='Delete message', custom_id=f'rpdelete_{interaction.custom_id.split("_")[1]}',
+                              disabled=False),
+            discord.ui.Button(style=discord.ButtonStyle.green, label='Mark as reviewed',
+                              custom_id=f'rpreview_{interaction.custom_id.split("_")[1]}',
                               disabled=False)
         )
         components = discord.ui.MessageComponents(btns)
@@ -603,6 +606,15 @@ class Bridge(commands.Cog):
             return await interaction.response.send_message('buddy you\'re not a global moderator :skull:',ephemeral=True)
         if interaction.custom_id.startswith('rpdelete'):
             msg_id = int(interaction.custom_id.replace('rpdelete_','',1))
+            btns = discord.ui.ActionRow(
+                discord.ui.Button(style=discord.ButtonStyle.red, label='Delete message',
+                                  custom_id=f'rpdelete_{interaction.custom_id.split("_")[1]}',
+                                  disabled=True),
+                discord.ui.Button(style=discord.ButtonStyle.green, label='Mark as reviewed',
+                                  custom_id=f'rpreview_{interaction.custom_id.split("_")[1]}',
+                                  disabled=False)
+            )
+            components = discord.ui.MessageComponents(btns)
 
             # Is this the parent?
             if not f'{msg_id}' in list(self.bot.bridged.keys()):
@@ -618,11 +630,8 @@ class Bridge(commands.Cog):
                     # Nothing.
                     return await interaction.response.send_message('Could not find message in cache!', ephemeral=True)
 
-            hooks = await interaction.guild.webhooks()
-            found = False
             roomname = interaction.message.embeds[0].fields[3].value
             origin_room = 0
-            index = 0
 
             for room in list(self.bot.db['rooms'].keys()):
                 if room==roomname:
@@ -690,7 +699,23 @@ class Bridge(commands.Cog):
 
             await interaction.message.edit(components=None)
             await msg_orig.edit(content=f'Deleted {deleted} forwarded messages')
-
+        elif interaction.custom_id.startswith('rpreview_'):
+            btns = discord.ui.ActionRow(
+                discord.ui.Button(style=discord.ButtonStyle.red, label='Delete message',
+                                  custom_id=f'rpdelete_{interaction.custom_id.split("_")[1]}',
+                                  disabled=True),
+                discord.ui.Button(style=discord.ButtonStyle.green, label='Mark as reviewed',
+                                  custom_id=f'rpreview_{interaction.custom_id.split("_")[1]}',
+                                  disabled=True)
+            )
+            components = discord.ui.MessageComponents(btns)
+            embed = interaction.message.embeds[0]
+            embed.color = 0x00ff00
+            author = f'@{interaction.user.name}'
+            if not interaction.user.discriminator == '0':
+                author = f'{interaction.user.name}#{interaction.user.discriminator}'
+            embed.title = f'This report has been reviewed by {author}!'
+            await interaction.response.edit_message(embed=embed,components=components)
 
     @commands.command(hidden=True)
     async def testreg(self, ctx, *, args=''):
@@ -965,7 +990,10 @@ class Bridge(commands.Cog):
             for webhook in hooks:
                 if webhook.id in hook_ids:
                     try:
-                        url = message.author.avatar.url
+                        if f'{message.author.id}' in self.bot.db['avatars']:
+                            url = self.bot.db['avatars'][f'{message.author.id}']
+                        else:
+                            url = message.author.avatar.url
                     except:
                         url = None
                     files = []
