@@ -21,7 +21,10 @@ from discord.ext import commands
 import json
 import traceback
 
-admin_ids = [356456393491873795, 549647456837828650]
+with open('config.json', 'r') as file:
+    data = json.load(file)
+
+admin_ids = data["admin_ids"]
 
 class AutoSaveDict(dict):
     def __init__(self, *args, **kwargs):

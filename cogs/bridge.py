@@ -25,6 +25,22 @@ from datetime import datetime
 import random
 import string
 import copy
+import json
+import re
+from tld import get_tld
+from utils import rapidphish
+
+with open('config.json', 'r') as file:
+    data = json.load(file)
+
+home_guild = data["home_guild"]
+logs_channel = data["logs_channel"]
+reports_channel = data["reports_channel"]
+
+# Configure PR and PR referencing here, if you need it for whatever reason.
+allow_prs = data["allow_prs"]
+pr_room_index = data["pr_room_index"] # If this is 0, then the oldest room will be used as the PR room.
+pr_ref_room_index = data["pr_ref_room_index"]
 
 mentions = discord.AllowedMentions(everyone=False, roles=False, users=False)
 
@@ -33,14 +49,12 @@ def encrypt_string(hash_string):
         hashlib.sha256(hash_string.encode()).hexdigest()
     return sha_signature
 
-
 def genid():
     value = ''
     for i in range(6):
         letter = random.choice(string.ascii_lowercase + string.digits)
         value = '{0}{1}'.format(value, letter)
     return value
-
 
 def is_room_locked(room, db):
     try:
@@ -52,6 +66,17 @@ def is_room_locked(room, db):
         traceback.print_exc()
         return False
 
+def findurl(string):
+    regex = r"(?i)\b((?:https?://|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'\".,<>?«»“”‘’]))"
+    url = re.findall(regex,string)
+    return [x[0] for x in url]
+
+
+def bypass_killer(string):
+    if not [*string][len(string) - 1].isalnum():
+        return string[:-1]
+    else:
+        raise RuntimeError()
 
 class Bridge(commands.Cog):
     def __init__(self, bot):
@@ -584,8 +609,8 @@ class Bridge(commands.Cog):
                 embed.set_author(name=sender)
         except:
             embed.set_author(name='[unknown, check sender ID]')
-        guild = self.bot.get_guild(1097238317881380984)
-        ch = guild.get_channel(1203676755559452712)
+        guild = self.bot.get_guild(home_guild)
+        ch = guild.get_channel(reports_channel)
         btns = discord.ui.ActionRow(
             discord.ui.Button(style=discord.ButtonStyle.red, label='Delete message', custom_id=f'rpdelete_{interaction.custom_id.split("_")[1]}',
                               disabled=False),
@@ -733,6 +758,8 @@ class Bridge(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
+        author_rp = message.author
+        content_rp = message.content
         if not message.webhook_id == None:
             # webhook msg
             return
@@ -815,6 +842,116 @@ class Bridge(commands.Cog):
                 pass
             return await message.channel.send(f'<@{message.author.id}> Invites aren\'t allowed!')
 
+        # Low-latency RapidPhish implementation
+        # Prevent message tampering
+        urls = findurl(message.content)
+        filtered = message.content.replace('\\', '')
+        for url in urls:
+            filtered = filtered.replace(url, '', 1)
+        for word in filtered.split():
+            # kill hyperlinks :woke:
+            if '](' in word:
+                # likely hyperlink, lets kill it
+                if word.startswith('['):
+                    word = word[1:]
+                if word.endswith(')'):
+                    word = word[:-1]
+                word = word.replace(')[', ' ')
+                words = word.split()
+                found = False
+                for word2 in words:
+                    words2 = word2.replace('](', ' ').split()
+                    for word3 in words2:
+                        if '.' in word3:
+                            if not word3.startswith('http://') or not word3.startswith('https://'):
+                                word3 = 'http://' + word3
+                            while True:
+                                try:
+                                    word3 = await self.bot.loop.run_in_executor(None, lambda: bypass_killer(word3))
+                                except:
+                                    break
+                            if len(word3.split('.')) == 1:
+                                continue
+                            else:
+                                if word3.split('.')[1] == '':
+                                    continue
+                            try:
+                                get_tld(word3.lower(), fix_protocol=True)
+                                if '](' in word3.lower():
+                                    word3 = word3.replace('](', ' ', 1).split()[0]
+                                urls.append(word3.lower())
+                                found = True
+                            except:
+                                pass
+
+                if found:
+                    # successful link detection from hyperlink yippee
+                    continue
+            if '.' in word:
+                while True:
+                    try:
+                        word = await self.bot.loop.run_in_executor(None, lambda: bypass_killer(word))
+                    except:
+                        break
+                if len(word.split('.')) == 1:
+                    continue
+                else:
+                    if word.split('.')[1] == '':
+                        continue
+                try:
+                    get_tld(word.lower(), fix_protocol=True)
+                    if '](' in word.lower():
+                        word = word.replace('](', ' ', 1).split()[0]
+                    urls.append(word.lower())
+                except:
+                    pass
+
+        key = 0
+        for url in urls:
+            url = url.lower()
+            urls[key] = url
+            if not url.startswith('http://') and not url.startswith('https://'):
+                urls[key] = f'http://{url}'
+            if '](' in url:
+                urls[key] = url.replace('](', ' ', 1).split()[0]
+            key = key + 1
+
+        if len(urls) > 0:
+            rpresults = rapidphish.compare_urls(urls, 0.85)
+            print(rpresults.__dict__)
+            if not rpresults.final_verdict=='safe':
+                try:
+                    await message.delete()
+                except:
+                    pass
+                if author_rp.discriminator == '0':
+                    user = f'@{author_rp.name}'
+                else:
+                    user = f'{author_rp.name}#{author_rp.discriminator}'
+                embed = discord.Embed(title='Suspicious link detected <:nevsus:1024028464954744832>',
+                                      description='RapidPhish Low-Latency Implementation has detected a suspicious link. But don\'t worry, we\'ve scanned it and took the appropriate action that you\'ve set us to take. <:neviraldi:981611276985831424>\n\nWe\'ll send the results here for you to see.',
+                                      color=0x0000ff, timestamp=datetime.utcnow())
+                try:
+                    embed.set_author(name=user, icon_url=author_rp.avatar)
+                except:
+                    embed.set_author(name=user, icon_url=author_rp.avatar)
+                embed.set_footer(text='Protected by RapidPhish LLI')
+                content = content_rp
+                if len(content) > 1020:
+                    content = content_rp[:-(len(content_rp) - 1017)]
+                embed.add_field(name='Message', value=f'||{content}||', inline=False)
+                embed.add_field(name='User ID', value=f'{author_rp.id}', inline=False)
+                embed.add_field(name='Detected by', value='RapidPhish', inline=False)
+                embed.add_field(name='Action taken', value='forwarding blocked', inline=True)
+                guild = self.bot.get_guild(home_guild)
+                ch = guild.get_channel(reports_channel)
+                await ch.send(embed=embed)
+                try:
+                    await message.channel.send('One or more URLs were flagged as potentially dangerous. **This incident has been reported.**',reference=message)
+                except:
+                    await message.channel.send('One or more URLs were flagged as potentially dangerous. **This incident has been reported.**')
+                return
+
         if not message.guild.explicit_content_filter == discord.ContentFilter.all_members:
             return await message.channel.send(
                 '**Hold up a sec!**\nThis server isn\'t letting Discord make sure nothing NSFW is being sent in SFW channels, meaning adult content could be sent over UniChat. We don\'t want that!'
@@ -894,11 +1031,11 @@ class Bridge(commands.Cog):
         is_pr = False
         is_pr_ref = False
         ref_id = ''
-        if origin_room == 1:
+        if origin_room == pr_room_index:
             is_pr = True
             pr_id = genid()
             pr_ids = {}
-        if origin_room == 2:
+        if origin_room == pr_ref_room_index:
             passed = True
             if message.content.startswith('['):
                 components = message.content.split(']', 1)
@@ -971,9 +1108,10 @@ class Bridge(commands.Cog):
             if key in list(gbans.keys()):
                 continue
             banlist = []
-            if f'{message.guild.id}' in list(self.bot.db['blocked'].keys()):
-                banlist = self.bot.db['blocked'][f'{message.guild.id}']
-            if (message.author.id in banlist or message.guild.id in banlist) and not message.author.id in self.bot.moderators:
+            if key in list(self.bot.db['blocked'].keys()):
+                banlist = self.bot.db['blocked'][key]
+            if (
+                    message.author.id in banlist or message.guild.id in banlist) and not message.author.id in self.bot.moderators:
                 continue
             if key in list(data.keys()):
                 hook_ids = data[key]
@@ -1002,20 +1140,32 @@ class Bridge(commands.Cog):
                         if dont_attach:
                             break
                         if (not 'audio' in attachment.content_type and not 'video' in attachment.content_type and
-                                not 'image' in attachment.content_type) or attachment.size > 25000000:
+                            not 'image' in attachment.content_type) or attachment.size > 25000000:
                             continue
                         try:
                             try:
-                                file = await attachment.to_file(use_cached=True,spoiler=attachment.is_spoiler())
+                                file = await attachment.to_file(use_cached=True, spoiler=attachment.is_spoiler())
                             except:
-                                file = await attachment.to_file(use_cached=True,spoiler=False)
+                                file = await attachment.to_file(use_cached=True, spoiler=False)
                             files.append(file)
                             index += 1
                         except:
                             pass
-                    if not message.reference==None or is_pr:
-                        if not message.reference==None:
-                            msg = message.reference.cached_message
+                    msg = None
+                    if not message.reference == None:
+                        msg = message.reference.cached_message
+                        if msg == None:
+                            try:
+                                msg = await message.channel.fetch_message(message.reference.message_id)
+                            except:
+                                pass
+                    if not message.reference == None or is_pr and not msg == None:
+                        if not message.reference == None and not msg == None:
+                            if f'{msg.author.id}' in list(gbans.keys()) or f'{msg.guild.id}' in list(gbans.keys()):
+                                banned = True
+                            elif (
+                                    msg.author.id in banlist or msg.guild.id in banlist) and not msg.author.id in self.bot.moderators:
+                                blocked = True
                             if msg == None:
                                 msg = await message.channel.fetch_message(message.reference.message_id)
 
@@ -1025,10 +1175,6 @@ class Bridge(commands.Cog):
                                 identifier_resp = identifier_resp[len(identifier_resp) - 1]
                                 author = author[:-(2 + len(identifier_resp))]
                             else:
-                                if f'{msg.author.id}' in gbans or f'{msg.guild.id}' in gbans:
-                                    banned = True
-                                elif (msg.author.id in banlist or msg.guild.id in banlist) and not msg.author.id in self.bot.moderators:
-                                    blocked = True
                                 author = f'{msg.author.name}#{msg.author.discriminator}'
                                 if msg.author.discriminator == '0':
                                     author = f'@{msg.author.name}'
@@ -1052,14 +1198,14 @@ class Bridge(commands.Cog):
                                     content = '**GLOBAL BANNED - MESSAGE HIDDEN**\nThe author of this message replied to a global banned user or server. Global bans are placed on users and servers that break UniChat rules continuously or/and severely.'
                                 elif blocked:
                                     content = '**SERVER BANNED - MESSAGE HIDDEN**\nThe author of this message replied to a server banned user or server. Server bans are placed on users and servers by this server\'s moderators.\nAsk them to unblock the origin user or server.'
-                            embed = discord.Embed(title=f'Replying to {author}',description=content,color=0xeba134)
-                            if not msg.author.avatar==None and not banned and not blocked:
-                                embed.set_author(name=author,icon_url=msg.author.avatar.url)
+                            embed = discord.Embed(title=f'Replying to {author}', description=content, color=0xeba134)
+                            if not msg.author.avatar == None and not banned and not blocked:
+                                embed.set_author(name=author, icon_url=msg.author.avatar.url)
                             else:
                                 embed.set_author(name=author)
                         embeds = og_embeds.copy()
                         components = None
-                        if not message.reference==None:
+                        if not message.reference == None and not blocked and not banned:
                             if not message.author.bot:
                                 embeds = []
                             else:
@@ -1067,12 +1213,13 @@ class Bridge(commands.Cog):
                             ButtonStyle = discord.ButtonStyle
                             if banned or blocked:
                                 btns = discord.ui.ActionRow(
-                                    discord.ui.Button(style=ButtonStyle.red, label=f'Replying to [hidden]',disabled=True)
-                                    )
+                                    discord.ui.Button(style=ButtonStyle.red, label=f'Replying to [hidden]',
+                                                      disabled=True)
+                                )
                             else:
                                 try:
                                     globalmoji = False
-                                    if msg.webhook_id==None:
+                                    if msg.webhook_id == None:
                                         reference_msg_id = self.bot.bridged[f'{msg.id}'][f'{webhook.guild_id}']
                                     else:
                                         try:
@@ -1083,48 +1230,65 @@ class Bridge(commands.Cog):
                                                 entry = self.bot.bridged[key]
                                                 if msg.id in entry.values():
                                                     try:
-                                                        reference_msg_id = self.bot.bridged[f'{key}'][f'{webhook.guild_id}']
+                                                        reference_msg_id = self.bot.bridged[f'{key}'][
+                                                            f'{webhook.guild_id}']
                                                     except:
                                                         msg = await webhook.channel.fetch_message(int(key))
-                                                        if not msg==None:
+                                                        if not msg == None:
                                                             reference_msg_id = int(key)
                                                     break
                                     if globalmoji:
                                         author = f'@{msg.author.name}'
                                     if len(msg.content) > 80:
-                                        trimmed = msg.content[:-(len(msg.content)-77)]+'...'
+                                        trimmed = msg.content[:-(len(msg.content) - 77)] + '...'
                                     else:
                                         trimmed = msg.content
-                                    trimmed = trimmed.replace('\n',' ')
+                                    trimmed = trimmed.replace('\n', ' ')
                                     btns = discord.ui.ActionRow(
-                                        discord.ui.Button(style=ButtonStyle.link, label=f'Replying to {author}',disabled=False,
+                                        discord.ui.Button(style=ButtonStyle.link, label=f'Replying to {author}',
+                                                          disabled=False,
                                                           url=f'https://discord.com/channels/{webhook.guild_id}/{webhook.channel_id}/{reference_msg_id}')
-                                        )
+                                    )
                                     if len(trimmed) > 0:
                                         btns2 = discord.ui.ActionRow(
                                             discord.ui.Button(style=ButtonStyle.blurple, label=trimmed, disabled=True)
-                                            )
-                                    else:
-                                        btns2 = discord.ui.ActionRow(
-                                            discord.ui.Button(style=ButtonStyle.blurple, label=f'x{len(msg.embeds)+len(msg.attachments)}', emoji='\U0001F3DE',disabled=True)
-                                            )
-                                except:
-                                    if is_pr_ref and sameguild:
-                                        btns = discord.ui.ActionRow(
-                                        discord.ui.Button(style=ButtonStyle.link, label=f'Replying to {author}',disabled=False,
-                                                          url=f'https://discord.com/channels/{webhook.guild_id}/{webhook.channel_id}/{message.reference.message_id}')
                                         )
                                     else:
-                                        if msg.author.id==self.bot.user.id:
-                                            btns = discord.ui.ActionRow(
-                                                discord.ui.Button(style=ButtonStyle.gray, label=f'Replying to [system message]',disabled=True)
+                                        btns2 = discord.ui.ActionRow(
+                                            discord.ui.Button(style=ButtonStyle.blurple,
+                                                              label=f'x{len(msg.embeds) + len(msg.attachments)}',
+                                                              emoji='\U0001F3DE', disabled=True)
+                                        )
+                                except:
+                                    if is_pr_ref and sameguild and not blocked and not banned:
+                                        btns = discord.ui.ActionRow(
+                                            discord.ui.Button(style=ButtonStyle.link, label=f'Replying to {author}',
+                                                              disabled=False,
+                                                              url=f'https://discord.com/channels/{webhook.guild_id}/{webhook.channel_id}/{message.reference.message_id}')
+                                        )
+                                    else:
+                                        try:
+                                            if msg.author.id == self.bot.user.id:
+                                                btns = discord.ui.ActionRow(
+                                                    discord.ui.Button(style=ButtonStyle.gray,
+                                                                      label=f'Replying to [system message]', disabled=True)
                                                 )
-                                        else:
-                                            btns = discord.ui.ActionRow(
-                                                discord.ui.Button(style=ButtonStyle.gray, label=f'Replying to [unknown]',disabled=True)
+                                            else:
+                                                btns = discord.ui.ActionRow(
+                                                    discord.ui.Button(style=ButtonStyle.gray,
+                                                                      label=f'Replying to [unknown]', disabled=True)
                                                 )
+                                        except:
+                                            btns = discord.ui.ActionRow(
+                                                discord.ui.Button(style=ButtonStyle.gray,
+                                                                  label=f'Replying to [unknown]', disabled=True)
+                                            )
                         try:
                             if blocked or banned:
+                                btns = discord.ui.ActionRow(
+                                    discord.ui.Button(style=ButtonStyle.red, label=f'Replying to [hidden]',
+                                                      disabled=True)
+                                )
                                 raise ValueError()
                             if is_pr:
                                 if is_pr_ref:
@@ -1135,34 +1299,38 @@ class Bridge(commands.Cog):
                                             raise ValueError()
                                         hooks_2 = await webhook.guild.webhooks()
                                         for hook_obj in hooks_2:
-                                            if hook_obj.id==hook:
+                                            if hook_obj.id == hook:
                                                 hook = hook_obj
                                                 break
                                         reference_msg_id = self.bot.prs[ref_id][f'{webhook.guild_id}']
                                         ref_btns = discord.ui.ActionRow(
-                                            discord.ui.Button(style=discord.ButtonStyle.link, label=f'Reference to PR #{ref_id}',
+                                            discord.ui.Button(style=discord.ButtonStyle.link,
+                                                              label=f'Reference to PR #{ref_id}',
                                                               url=f'https://discord.com/channels/{webhook.guild_id}/{hook.channel_id}/{reference_msg_id}',
                                                               emoji='\U0001F517',
                                                               disabled=False)
-                                            )
+                                        )
                                     except:
                                         traceback.print_exc()
                                         ref_btns = discord.ui.ActionRow(
-                                            discord.ui.Button(style=discord.ButtonStyle.gray, label=f'Reference to PR #{ref_id}',emoji='\U0001F517',disabled=True)
-                                            )
+                                            discord.ui.Button(style=discord.ButtonStyle.gray,
+                                                              label=f'Reference to PR #{ref_id}', emoji='\U0001F517',
+                                                              disabled=True)
+                                        )
                                 else:
                                     ref_btns = discord.ui.ActionRow(
-                                        discord.ui.Button(style=discord.ButtonStyle.blurple, label=f'PR ID: {pr_id}',emoji='\U0001F4AC',disabled=True)
-                                        )
+                                        discord.ui.Button(style=discord.ButtonStyle.blurple, label=f'PR ID: {pr_id}',
+                                                          emoji='\U0001F4AC', disabled=True)
+                                    )
                                 try:
-                                    components = discord.ui.MessageComponents(ref_btns,btns,btns2)
+                                    components = discord.ui.MessageComponents(ref_btns, btns, btns2)
                                 except:
                                     try:
-                                        components = discord.ui.MessageComponents(ref_btns,btns)
+                                        components = discord.ui.MessageComponents(ref_btns, btns)
                                     except:
                                         components = discord.ui.MessageComponents(ref_btns)
                             else:
-                                components = discord.ui.MessageComponents(btns,btns2)
+                                components = discord.ui.MessageComponents(btns, btns2)
                         except:
                             components = discord.ui.MessageComponents(btns)
                         author_resp = message.author.global_name
@@ -1185,7 +1353,7 @@ class Bridge(commands.Cog):
                             if is_pr and not is_pr_ref:
                                 pr_ids.update({f'{webhook.guild_id}': msg.id})
                             if not f'{message.author.id}' in list(self.bot.owners.keys()):
-                                self.bot.owners.update({f'{message.author.id}':[]})
+                                self.bot.owners.update({f'{message.author.id}': []})
                             self.bot.owners[f'{message.author.id}'].append(msg.id)
                         except discord.HTTPException as e:
                             if e.code == 413:
@@ -1204,7 +1372,7 @@ class Bridge(commands.Cog):
                             if is_pr and not is_pr_ref:
                                 pr_ids.update({f'{webhook.guild_id}': msg.id})
                             if not f'{message.author.id}' in list(self.bot.owners.keys()):
-                                self.bot.owners.update({f'{message.author.id}':[]})
+                                self.bot.owners.update({f'{message.author.id}': []})
                             self.bot.owners[f'{message.author.id}'].append(msg.id)
                     else:
                         if message.author.bot:
@@ -1228,7 +1396,7 @@ class Bridge(commands.Cog):
                             else:
                                 hookmsg_ids.update({f'{msg.guild.id}': msg.id})
                             if not f'{message.author.id}' in list(self.bot.owners.keys()):
-                                self.bot.owners.update({f'{message.author.id}':[]})
+                                self.bot.owners.update({f'{message.author.id}': []})
                             self.bot.owners[f'{message.author.id}'].append(msg.id)
                         except discord.HTTPException as e:
                             if e.code == 413:
@@ -1245,7 +1413,7 @@ class Bridge(commands.Cog):
                             else:
                                 hookmsg_ids.update({f'{msg.guild.id}': msg.id})
                             if not f'{message.author.id}' in list(self.bot.owners.keys()):
-                                self.bot.owners.update({f'{message.author.id}':[]})
+                                self.bot.owners.update({f'{message.author.id}': []})
                             self.bot.owners[f'{message.author.id}'].append(msg.id)
         self.bot.owners[f'{message.author.id}'].append(message.id)
         if is_pr and not is_pr_ref:
@@ -1404,8 +1572,8 @@ class Bridge(commands.Cog):
         guild_hash = encrypt_string(f'{message.guild.id}')[:3]
         identifier = user_hash + guild_hash
 
-        guild = self.bot.get_guild(1097238317881380984)
-        ch = guild.get_channel(1189146414735953941)
+        guild = self.bot.get_guild(home_guild)
+        ch = guild.get_channel(logs_channel)
 
         roomname = list(self.bot.db['rooms'].keys())[origin_room]
 
