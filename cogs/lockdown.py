@@ -72,7 +72,7 @@ class Lockdown(commands.Cog):
             if not cog=='cogs.lockdown':
                 self.bot.unload_extension(cog)
         embed.title = 'Lockdown activated'
-        embed.description = 'The bot is now in a crippled state. It cannot recover without a reboot.'
+        embed.description = 'The bot is now in a crippled state. It **cannot** recover without a reboot.'
         return await interaction.response.edit_message(embed=embed,components=components_cancel)
 
 def setup(bot):
