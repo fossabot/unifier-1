@@ -33,31 +33,34 @@ def encrypt_string(hash_string):
 
 @tasks.loop(seconds=300)
 async def changestatus():
-    status_messages = [
-        "with the ban hammer",
-        "with fire",
-        "with the API",
-        "hide and seek",
-        "with code",
-        "in debug mode",
-        "in a parallel universe",
-        "with commands",
-        "a game of chess",
-        "with electrons",
-        "with the matrix",
-        "with cookies",
-        "with the metaverse",
-        "with emojis",
-        "with Nevira",
-        "with green.",
-        "with ItsAsheer",
-        "webhooks",
-    ]
-    new_stat = random.choice(status_messages)
-    if new_stat == "webhooks":
-        await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=new_stat))
+    if bot.locked:
+        await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="LOCKDOWN ACTIVATED"))
     else:
-        await bot.change_presence(activity=discord.Game(name=new_stat))
+        status_messages = [
+            "with the ban hammer",
+            "with fire",
+            "with the API",
+            "hide and seek",
+            "with code",
+            "in debug mode",
+            "in a parallel universe",
+            "with commands",
+            "a game of chess",
+            "with electrons",
+            "with the matrix",
+            "with cookies",
+            "with the metaverse",
+            "with emojis",
+            "with Nevira",
+            "with green.",
+            "with ItsAsheer",
+            "webhooks",
+        ]
+        new_stat = random.choice(status_messages)
+        if new_stat == "webhooks":
+            await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=new_stat))
+        else:
+            await bot.change_presence(activity=discord.Game(name=new_stat))
 
 @bot.event
 async def on_ready():
