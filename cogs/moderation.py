@@ -23,6 +23,7 @@ from datetime import datetime
 from discord.ext import commands
 import traceback
 import json
+from utils import wreport
 
 with open('config.json', 'r') as file:
     data = json.load(file)
@@ -230,6 +231,11 @@ class Moderation(commands.Cog, name=":shield: Moderation"):
 
         ctx.message.embeds = []
         ctx.message.content = content
+        if forever:
+            wduration = "forever"
+        else:
+            wduration = duration
+        wreport.report_user_gban(userid, ctx.author.id, reason, duration)
         await ctx.send('global banned <:nevheh:990994050607906816>')
         
 
@@ -339,6 +345,7 @@ class Moderation(commands.Cog, name=":shield: Moderation"):
             await user.send(embed=embed)
         except:
             return await ctx.send('bro has their dms off :skull:')
+        wreport.report_user_warned(userid, ctx.author.id, reason)
         await ctx.send('user warned')
 
     @commands.command(hidden=True,name='globaIban')
