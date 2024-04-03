@@ -1,7 +1,11 @@
 import requests
 
+
+with open('config.json', 'r') as file:
+    data = json.load(file)
+    
 # ALERT: This is intended for Unifier Discord Bot, and it adapts to its behaviors.
-API_KEY = "TEST_PLEASE_REPLACE"
+API_KEY = data["WATCHTOWER_API_KEY"]
 
 # DO NOT CHANGE THIS IF YOU DONT KNOW WHAT YOU ARE DOING:
 WATCHTOWER_NODE = "https://watchtower.altex.page"
