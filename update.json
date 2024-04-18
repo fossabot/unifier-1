@@ -1,6 +1,6 @@
 {
-  "version": "v1.1.9",
-  "release": 31,
-  "reboot": 30,
-  "description": "AGPLv3 compliance"
+  "version": "v1.2.0",
+  "release": 34,
+  "reboot": 33,
+  "description": "- Introduing **Squads**, a system where you and your server members can get together to compete in events. Send your server to the top of the leaderboards!\n- Adds content-based raid detection (links, long message, most caps)."
 }
