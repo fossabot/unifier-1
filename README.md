@@ -1,3 +1,7 @@
+> [!WARNING]
+> Watchtower integrated into Unifier **has been discontinued**, please use [Unifier WatchTower Plugin](https://github.com/NullyIsHere/unifier-watchtower)
+
+
 <h1 align=center>
   <img width=64 src=https://github.com/greeeen-dev/unifier/assets/41323182/3065245a-28b6-4410-9b07-8b940f4796ae>
   
